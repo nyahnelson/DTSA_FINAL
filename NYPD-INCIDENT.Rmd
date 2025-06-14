@@ -1,0 +1,136 @@
+---
+title: "Project: NYPD Shooting Incident Data (Historic)"
+author: ""
+date: "2025-05-21"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+# Load necessary libraries
+library(tidyverse)
+library(lubridate)
+library(janitor)
+library(ggplot2)
+library(rpart)
+
+```
+## Introduction
+This is an analysis on the NYPD Shooting Incident data from a csv file that is available to the public on cityofnewyork.us. This report will go over how to import the data, how to clean it, a few examples of visualzing the data, an example of applying a model to the data, and a conclusion with some discussion of bias. 
+
+The goal of this report is to answer the question about what kind of factors cause a high number of incidents in NYC.
+
+## Import Data
+The first step is to read in the file from the url link. 
+```{r get_data}
+# Import the dataset
+nypd_data <- read_csv("https://data.cityofnewyork.us/api/views/833y-fsy8/rows.csv?accessType=DOWNLOAD")
+```
+
+## clean data
+I chose to clean the data by cleaning up the names for consistency, removing duplicate rows, removing missing rows from specific columns, and extracting the year and month from the date to help with further analysis. 
+```{r clean_data}
+
+# Clean and process the NYPD data
+nypd_clean <- nypd_data %>%
+  janitor::clean_names() %>%                     # clean column names for consistency
+  distinct() %>%                                 # drop duplicate rows
+  drop_na(longitude, latitude, occur_date) %>%   # remove rows missing longitude, latitude, or date
+  mutate(
+    occur_date = mdy(occur_date),                # convert 'occur_date' string to Date type
+    year = year(occur_date),                     # extract year
+    month = month(occur_date, label = TRUE)      # extract month
+  )
+
+```
+
+## plots
+I chose to visualize three different parts of the data. I used a line plot to visualize the number of incidents per year, a bar graph to visualize the number of incidents per month, and a scatter plot to visualize where in NYC 5 boroughs most incidents occurred. 
+
+The plot for incidents per year shows that the number of incidents was declining from years 2006 to 2019, and then there was a sharp increase in incidents in the year 2020. This could be due to the politcal climate at the time surrounding the pandemic and the Black Lives Matter movement. 
+
+The bar plot for incidents per months shows that the summer months of June, July, and August see more incidents than other months. Colder months like January, February, and March see less incidents. This could be weather related as more people are inside in the winter and more are outside in the summer, leading to a higher chance of an incident that would be reported
+
+The scatter plot showing where incidents frequently happen shows that the Brooklyn borough experience the most incidents. This could be because the population in Brooklyn is larger than other boroughs or it could be because there is a known history of more crime here suchs as gangs or poverty. 
+```{r visualize_data}
+# incidents per year - line plot
+incidents_per_year <- nypd_clean %>%
+  group_by(year) %>%           # group data by 'year' column
+  summarise(count = n()) %>%   # count instances per year
+  arrange(year)                # sort by year
+
+plot(incidents_per_year$year, incidents_per_year$count, type = "b",
+     col = "steelblue", pch = 19, lwd = 2,
+     xlab = "Year", ylab = "Number of Incidents",
+     main = "Number of Shooting Incidents Over Years",
+     xaxt = "n")  # suppress default x-axis
+
+axis(1, at = incidents_per_year$year, labels = incidents_per_year$year)
+
+# incidentes per month - bar plot
+incidents_per_month <- nypd_clean %>%
+  group_by(month) %>%       
+  summarise(count = n()) %>% 
+  arrange(month)
+
+barplot(height = incidents_per_month$count,
+        names.arg = levels(incidents_per_month$month),
+        col = "steelblue",
+        border = NA,
+        main = "Number of Shooting Incidents Per Month", 
+        xlab = "Month", 
+        ylab = "Number of Incidents", 
+        las = 2)                    # rotate month labels for readability
+
+# incidents location - scatter plot
+ggplot(nypd_clean, aes(x = longitude, y = latitude, color = boro)) +
+  geom_point(alpha = 0.4, size = 1) +
+  labs(title = "Shooting Incidents by Borough",
+       x = "Longitude", y = "Latitude", color = "Borough") +
+  theme_minimal()
+
+```
+
+## models
+
+I chose to create a predictive model of the number of incidents per year. It is clear that the year of 2020 was unusual for incidents in NYC, and I wanted to see if a model could indicate that. The model appears to predict that crime is declining, even with the year of 2020 in the model. I challenged the model on the year 2026 and it predicts that the year will have around 1148 incidents. 
+```{r model_data}
+
+# predict incident count by year
+model_year <- lm(count ~ year, data = incidents_per_year)
+summary(model_year)
+
+library(ggplot2)
+
+ggplot(incidents_per_year, aes(x = year, y = count)) +
+  geom_point(color = "steelblue", size = 3) +          # scatter plot of actual data points
+  geom_smooth(method = "lm", color = "darkred") +      # linear regression line with confidence interval (prediction)
+  labs(
+    title = "Number of Shooting Incidents Over Years",
+    x = "Year",
+    y = "Number of Incidents"
+  ) +
+  theme_minimal()
+
+# Create new data frame with the year you want to predict
+new_year <- data.frame(year = 2026)
+
+# Use predict() to get the predicted count
+predicted_count <- predict(model_year, newdata = new_year)
+
+# Show the predicted count
+predicted_count
+
+
+
+```
+
+## Conclusion and discussion of Bias
+There are a number of areas for bias here. Particularly, this is only data for 'reported' incidents and there are surly more incidents that went unreported. There also can be geographical bias. For example, if areas like Brooklyn historically have seen more incidents, then there may be more police officers in this borough who are able to report incidents compared to the number of police officers in another borough. This means that more unreported incidents may happen in other neighborhoods. 
+
+Overall, my analysis did show an indication about the year 2020 and I had to lookup why this was. The political climate at the time is a big factor in what may have caused the increase in incidents. I was also curious about how NYC decreased the number of incidents by a almost half just a few years after 2020. There were a lot of political movements going on at the time that called for stronger laws that could've caused the decrease. 
+
+In conclusion, my analysis showed that the year 2020 had a surge of incidents, the summer months experienced the most incidents, and Brooklym had the most incidents. The year of 2020 started with the global pandemic and around the end of May the BLM movement started, which incited incdents. After a quick google search, the pandemic and the BLM movement both had a huge impact on the borough of Brooklyn, which could be the reason why there were so many incidents here. To answer the question about what factors cause high incident rates, you can draw the conclusion about external factors not included in the dataset such as global pandemics or political movements based on the year. From the month analysis, can also say that more people are outside in the summer and are more likely to have an incident reported if it is in the public. From the borough analysis, this can be made based on the bias discussion from above. You would have to look at multiple factors and come to the conclusion that each year is different, which is why 2020 stands out. Of course this is just based off of the data I analyized and with some additonal historic information found from searching online.
