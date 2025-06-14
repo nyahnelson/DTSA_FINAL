@@ -1,0 +1,196 @@
+---
+title: "Final Project: Analyze Covid 19 Data"
+author: ""
+date: "2025-05-31"
+output:
+  pdf_document: default
+  html_document: default
+---
+## Introduction
+This is an analysis on the COVID-19 data from a csv file that is available to the public on a github repository (link is in the import data section). This report will go over how to import the data, how to clean it, a few examples of visualzing the data, an example of applying a model to the data, and a conclusion with some discussion of bias. 
+
+The goal of this report is to answer the question about which country had the highest amount of cases and why.
+
+## Import and Install Libraries
+Install these libraries if needed using: install.packages("name_of_library")
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(janitor)
+library(ggplot2)
+library(rpart)
+library(dplyr)
+```
+
+## Import Data
+First step is to read in the data using the links below and storing the csv tables in variables that will be cleaned and alayzed later on. 
+```{r import_data}
+# url to git hub repo
+url_in <- "https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series/"
+
+# names of files being used in this analysis
+file_names <- c(
+  "time_series_covid19_confirmed_US.csv",
+  "time_series_covid19_confirmed_global.csv",
+  "time_series_covid19_deaths_US.csv",
+  "time_series_covid19_deaths_global.csv"
+)
+
+# combine base URL and file names for reading
+urls <- str_c(url_in, file_names)
+
+# read data into variables
+US_cases     <- read_csv(urls[1], show_col_types = FALSE)
+global_cases <- read_csv(urls[2], show_col_types = FALSE)
+US_deaths    <- read_csv(urls[3], show_col_types = FALSE)
+global_deaths <- read_csv(urls[4], show_col_types = FALSE)
+
+```
+
+## Tidy Data
+After the data is stored in variables, we can clean it. Since my question is about which location had the highest amount of cases, we can ignore the deaths datasets for now, so I will only be going over how to clean the cases data for both global and US data. 
+
+Since this analysis is about locaiton, I chose to remove all columns except province/state, country/region, latitude, longitude to analyze the location data. I also chose to clean up the names specificaly for the dates so they are all uniform. 
+
+```{r tidy_data}
+global_cases <- global_cases %>% 
+  clean_names() %>%
+  pivot_longer(
+    cols = -c(province_state, country_region, lat, long),
+    names_to = "date",
+    values_to = "cases"
+  ) %>%
+  mutate(
+    date = str_remove(date, "^x"),
+    date = as.Date(date, format = "%m_%d_%y")
+  ) %>%
+  select(-lat, -long)
+
+US_cases <- US_cases %>%
+  clean_names() %>%
+  select(-uid, -iso2, -iso3, -code3, -fips, -admin2, -combined_key) 
+
+US_cases <- US_cases %>%
+  pivot_longer(
+      cols = -c(province_state, country_region, lat, long),
+      names_to = "date",
+      values_to = "cases"
+    ) %>%
+    mutate(
+      date = str_remove(date, "^x"),
+      date = as.Date(date, format = "%m_%d_%y")
+    ) 
+
+```
+
+## Analyze data with Plots
+The First approach to visualization for this analysis is to use a line graph to show us which country had the highest amount of cases. 
+
+First I grouped global_cases by country and sum of total cases. Then I only took the top 6 countries for visualizing purposes since there are a lot of countries in the data. The line graph was plotted using the ggplot() library. 
+```{r analyze_data_plots_line_graph}
+
+# group countries with sum of cases
+global_summary <- global_cases %>%
+  group_by(country_region, date) %>%
+  summarise(total_cases = sum(cases, na.rm = TRUE), .groups = "drop")
+
+# identify top 6 countries by latest case count to graph
+top_countries <- global_summary %>%
+  filter(date == max(date)) %>%
+  arrange(desc(total_cases)) %>%
+  slice_head(n = 6) %>%
+  pull(country_region)
+
+# create line graph
+global_summary %>%
+  filter(country_region %in% top_countries) %>%
+  ggplot(aes(x = date, y = total_cases, color = country_region)) +
+  geom_line(linewidth = 1) +
+  labs(
+    title = "Cumulative COVID-19 Cases Over Time",
+    subtitle = "Top 6 countries with highest total case counts",
+    x = "Date", y = "Total Cases", color = "Country"
+  ) +
+  scale_y_continuous(labels = scales::comma) +
+  scale_color_brewer(palette = "Dark2") +
+  theme_minimal(base_size = 14)
+
+
+```
+
+This graph tells us that the highest case count is in the US. The US has the third highest population in the world after India and China. The country is also very mobile and people move around a lot for business or pleasure, which could have caused a high rate of spread and led to high amount of cases. There was also a lack in response to the situation from the government which could have prevented the high amount of cases. The health care industry was very overwhelmed during this period and both the states and national government took a while to take the situation seriously and start encouring individuals to stay at home more. 
+
+Let's further analyze the US case data.
+
+Similary to what we did with global data, I am extracting the top 6 US states with the highest case count. Then I am applying them to a bar chart to visualize which states had the highest amount of cases.
+```{r analyze_data_plots_scatter_plot}
+
+state_totals <- US_cases %>%
+  group_by(province_state) %>%
+  summarise(total_cases = sum(cases, na.rm = TRUE)) %>%
+  arrange(desc(total_cases)) %>%
+  slice_head(n = 6)
+
+ggplot(state_totals, aes(x = reorder(province_state, total_cases), y = total_cases)) +
+  geom_col(fill = "steelblue") +
+  coord_flip() +
+  labs(
+    title = "Total COVID-19 Cases by State",
+    x = "State",
+    y = "Total Cases"
+  ) +
+  theme_minimal()
+
+```
+As for why the states are what they are, the first and most plausible being that these are among the higest populated states in the country. They all also have a very high urban density in cities such as Los Angeles, Dallas, Miami, New York City, Chicago, and Philadelphia which could have caused an increase in trasnmission rates. These states are also international travel pubs with large airports and a high number of connections, so people from other countries could have brought the disease and spread it quickly because of the population and density. All of these factors could have easily leas to the higher amount of case detection and spread.
+
+## Analyze data with Models 
+Create a cluster model to see which locations behave similarly to help understand why the US had the most cases.
+
+First group data with key statistics per country such as total number of cases. 
+
+Then scale these statistics so we can apply k-means clustering. 
+
+Apply a model to use k-means clustering with the same seed below for reproducibility and with 3 clusters as the goal (3 for low, medium, high). This will cluster countries with similar statistics to the US data.  
+```{r analyze_data_models}
+
+
+# group data
+cluster_data <- global_cases %>%
+  group_by(country_region) %>%
+  summarise(
+    total_cases = sum(cases, na.rm = TRUE),
+    start_date = min(date[cases > 0], na.rm = TRUE),
+    end_date = max(date[cases > 0], na.rm = TRUE),
+    duration = as.numeric(end_date - start_date),
+    num_provinces = n_distinct(province_state)
+  ) %>%
+  ungroup()
+
+# scale data for k means
+cluster_scaled <- scale(cluster_data %>% select(total_cases, duration, num_provinces))
+
+# model application using k means 
+set.seed(42) # use same seed for reproducibility
+kmeans_model <- kmeans(cluster_scaled, centers = 3)
+
+# add cluster data back into the summarized data
+cluster_data_clean <- cluster_data %>%
+  mutate(cluster = kmeans_model$cluster)
+
+# extract top 10 countries for the clusters
+top_10_total_cases <- cluster_data_clean %>%
+  arrange(desc(total_cases)) %>%
+  slice_head(n = 10)
+
+print("Top 10 countries by total cases:")
+print(top_10_total_cases)
+
+```
+The clustering data shows that countries with a high population (India, Russia, Brazil) and countries with a high ubran density (UK, France, South Korea) also had similar statistics to the US. This tells us that those are two of the highest factors leading to the high case count in the US
+
+## Conclusion and Discussion of Bias
+It is important to note that bias could have effected the data. Some bias includes testing bias. For example, third world countries may not have been able to afford testing or been able to properly report data. Testing bias can also include individuals who may have had symptoms but did not get tested and thus were also not reported. There could also be reporting bias at play here. Some government may delay or supress data. This time period of COVID-19 was a particularly high climate of politics, and this could have caused governments to avoid reporting data. 
+
+In conclusion, we were able to analyze how the US saw the highest number of cases through visualization. We then visualized how the US states California, New York, Texas, Florida, Illinois, and Pennsylvania all had the highest amount of cases in the US. In order to understand why this country and these cities saw the highest amount of cases, we applied a k-means clustering model to the entire global data to group countries with similarl statistics to the US.
